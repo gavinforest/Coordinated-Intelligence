@@ -23,25 +23,40 @@ for simInd=1:N
         aliceGrads = zeros([1 2]);
         bobGrads = zeros([1 2]);
         eveGrads = zeros([1 2]);
-        for sampleInd=1:size(data,1)
+        ybars = zeros([3 2]);
+
+        %Initial pass to establish ybars
+        for sampleInd=1:numSamples
             s = data(sampleInd,:); %a ROW of data
             
             ys = [alice(s) (1- alice(s));
                   bob(s) (1- bob(s));
                   eve(s) (1-eve(s))];
+            ybars = ybars + ys;
+           
+        end
 
-             payoffs = [ys(1,:) * antiCoordGame * (ys(2,:)' + ys(3,:)'); %alice
-                        ys(2,:) * antiCoordGame * (ys(1,:)' + ys(3,:)'); %bob
-                        ys(3,:) * coordGame * (ys(1,:)' + ys(2,:)')]; %eve
+        % Compute gradients pass
+        for sampleInd=1:numSamples
+            s = data(sampleInd, :);
+            ys = [alice(s) (1- alice(s));
+                  bob(s) (1- bob(s));
+                  eve(s) (1-eve(s))];
 
-            payoff_tracking(epoch,:) = payoff_tracking(epoch,:) + payoffs'/numSamples;
-            
             % alice and bob ascend anti-coordination game payoff
             aliceGrads(s) = aliceGrads(s) + [1 -1] * antiCoordGame * (ys(2,:) + ys(3,:))';
             bobGrads(s) = bobGrads(s) + [1 -1] * antiCoordGame * (ys(1,:) + ys(3,:))';
             % eve gradient ascends coordination game payoff
             eveGrads(s) = eveGrads(s) + [1 -1] * coordGame * (ys(1,:) + ys(2,:))';
+
+            % Track game payoffs
+            payoffs = [ys(1,:) * antiCoordGame * (ys(2,:)' + ys(3,:)'); %alice
+                       ys(2,:) * antiCoordGame * (ys(1,:)' + ys(3,:)'); %bob
+                       ys(3,:) * coordGame * (ys(1,:)' + ys(2,:)')]; %eve
+
+            payoff_tracking(epoch,:) = payoff_tracking(epoch,:) + payoffs'/numSamples;
         end
+
         % Gradient ascend payoff
         alice = alice + lr * aliceGrads ./ numSamples;
         bob = bob + lr * bobGrads ./ numSamples;
