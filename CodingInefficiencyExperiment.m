@@ -1,4 +1,14 @@
-%% Set up strategies
+%% Experiment of Agents Learning Coding Inefficiency
+% Alice and Bob each have one output in [0,1], viewed as a probability, and
+% 4 samples upon which to vary their outputs. We view each output as the
+% probabilty of a weighted coin, and each agent seeks to maximize the
+% following
+% 1. Given the average weight of my coins across all samples, maximize the
+% average inefficiencies of encoding each weighted coin with that average
+% 2. Given the conditional probability of a "heads" from alice/bob's coin
+% given a "heads" from bob/alice's coin, and the output of bob/alice, what
+% is the average coding inefficiency of alice/bob's weighted coin?
+
 
 data = (1:4)'; %each sample is a row (like a database row)
 epochs=10000;
