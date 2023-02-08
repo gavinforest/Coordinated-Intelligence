@@ -12,6 +12,7 @@
 numSamples = 4;
 data = (1:numSamples)'; %each sample is a row (like a database row)
 epochs=10000;
+lr = 0.001;
 
 tic;
 alice = rand(1,numSamples);
@@ -19,22 +20,36 @@ bob = rand(1,numSamples);
 payoff_tracking = zeros(epochs,2);
 
 for epoch=1:epochs
+    %% Establish baseline payoffs
     payoffs = inefficiencyPayoffs(data, alice,bob);
-    evolveInd = ceil(rand *  2); % is alice or bob going to evolve?
-    if evolveInd == 1
-        potAlice = rand(1,numSamples);
-        potPayoffs = inefficiencyPayoffs(data, potAlice, bob);
-        if potPayoffs(1) > payoffs(1)
-            alice = potAlice;
-        end
-    else
-        potBob = rand(1,numSamples);
-        potPayoffs = inefficiencyPayoffs(data, alice, potBob);
-        if potPayoffs(2) > payoffs(2)
-            bob = potBob;
-        end
+    payoff_tracking(epoch,:) = payoffs;
+
+    %% Approximate gradients for Alice
+    aSteps = zeros(1,numSamples);
+    for perturbInd=1:numSamples
+        perturbation = zeros(1,numSamples);
+        perturbation(perturbInd) = lr;
+        perturbedPayoffs = inefficiencyPayoffs(data, alice + perturbation, bob);
+        aSteps(perturbInd) = lr * (perturbedPayoffs(1) > payoffs(1)) ...
+                            - lr * (perturbedPayoffs(1) < payoffs(1));
     end
-    payoff_tracking(epoch, :) = payoffs;
+
+    %% Approximatee gradients for Bob
+    bSteps = zeros(1, numSamples);
+    for perturbInd=1:numSamples
+        perturbation = zeros(1,numSamples);
+        perturbation(perturbInd) = lr;
+        perturbedPayoffs = inefficiencyPayoffs(data, alice, bob + perturbation);
+        bSteps(perturbInd) = lr * (perturbedPayoffs(2) > payoffs(2)) ...
+                            - lr * (perturbedPayoffs(2) < payoffs(2));
+    end
+
+    %% Gradient ascend payoffs
+    alice = alice + aSteps;
+    bob = bob + bSteps;
+
+    alice = min(max(alice, 0.001), 0.999);
+    bob = min(max(bob, 0.001), 0.999);
 
 end
     
