@@ -9,26 +9,26 @@
 % given a "heads" from bob/alice's coin, and the output of bob/alice, what
 % is the average coding inefficiency of alice/bob's weighted coin?
 
-
-data = (1:4)'; %each sample is a row (like a database row)
+numSamples = 4;
+data = (1:numSamples)'; %each sample is a row (like a database row)
 epochs=10000;
 
 tic;
-alice = rand(1,4);
-bob = rand(1,4);
+alice = rand(1,numSamples);
+bob = rand(1,numSamples);
 payoff_tracking = zeros(epochs,2);
 
 for epoch=1:epochs
     payoffs = inefficiencyPayoffs(data, alice,bob);
     evolveInd = ceil(rand *  2); % is alice or bob going to evolve?
     if evolveInd == 1
-        potAlice = rand(1,4);
+        potAlice = rand(1,numSamples);
         potPayoffs = inefficiencyPayoffs(data, potAlice, bob);
         if potPayoffs(1) > payoffs(1)
             alice = potAlice;
         end
     else
-        potBob = rand(1,4);
+        potBob = rand(1,numSamples);
         potPayoffs = inefficiencyPayoffs(data, alice, potBob);
         if potPayoffs(2) > payoffs(2)
             bob = potBob;
