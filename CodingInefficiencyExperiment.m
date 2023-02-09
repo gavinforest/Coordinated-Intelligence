@@ -9,15 +9,14 @@
 % given a "heads" from bob/alice's coin, and the output of bob/alice, what
 % is the average coding inefficiency of alice/bob's weighted coin?
 
-M = 2;
+M = 4;
 data = (1:M)'; %each sample is a row (like a database row)
 epochs=10000;
 lr = 0.1;
 
 tic;
-% alice = rand(1,M);
-alice = [0.5, 0.5];
-bob = [0.5, 0.5];
+alice = rand(1,4);
+bob = rand(1,4);
 payoff_tracking = zeros(epochs,2);
 
 for epoch=1:epochs
@@ -27,19 +26,23 @@ for epoch=1:epochs
 
     %% Calculate statistics
     jDist = jointDistribution(data, alice, bob);
-    aDist = sum(jDist, 2);
+    aDist = jDist * [1;1];
     aBar = aDist(1);
-    bDist = sum(jDist, 1);
+    bDist = [1 1] * jDist;
     bBar = bDist(1);
 
-    distACondB = jDist(:,1) / sum(jDist(:,1));
+    distACondB = jDist * [1;0];
+    distACondB = distACondB / sum(distACondB);
     pACondB = distACondB(1);
-    distACondBc = jDist(:,2) / sum(jDist(:, 2));
+    distACondBc = jDist * [0;1];
+    distACondBc = distACondBc / sum(distACondBc);
     pACondBc = distACondBc(1);
 
-    distBCondA = jDist(1,:) / sum(jDist(1,:));
+    distBCondA = [1 0 ] * jDist;
+    distBCondA = distBCondA / sum(distBCondA);
     pBCondA = distBCondA(1);
-    distBCondAc = jDist(2,:) / sum(jDist(2,:));
+    distBCondAc = [0 1] * jDist;
+    distBCondAc = distBCondAc / sum(distBCondAc);
     pBCondAc = distBCondAc(1);
 
     %% Calculate samplewise conditionals
@@ -57,14 +60,14 @@ for epoch=1:epochs
     dLa_k__abar = -ones(M,M)/M .* (alice'./aBar - (1-alice')./(1-aBar));
     dLa_k__abar = dLa_k__abar - diag(log(aBar) - log(1-aBar) .* ones(1,M));
 
-    % Derivative of H(P(A|b_k))
-    dHPACondb_k = -ones(M,M)/M .* (log(pACondb_k) - log(1-pACondb_k)) .* ...
-                    (bob' * bob ./ bBar + (1-bob') * (1-bob) ./ (1-bBar));
-
     % Derivative of L(a_k, P(A|b_k))
-    dLa_k__PACondb_k = -ones(M,M)/M * (log(pACondb_k) - log(1-pACondb_k)) .* ...
+    dLa_k__PACondb_k = -ones(M,M)/M * (alice' ./ pACondb_k - (1-alice') ./ (1-pACondb_k)) .* ...
                         (bob'  .* bob / bBar + (1-bob') .* (1-bob) / bBar);
     dLa_k__PACondb_k = dLa_k__PACondb_k - diag(log(pACondb_k) - log(1-pACondb_k));
+
+    % Derivative of H(P(A|b_k))
+    dHPACondb_k = -ones(M,M)/M .* (log(pACondb_k) - log(1-pACondb_k)) .* ...
+                    (bob' .* bob ./ bBar + (1-bob') .* (1-bob) ./ (1-bBar));
 
     aGrads = dLa_k__abar - dHofAbar + dLa_k__PACondb_k - dHPACondb_k;
     ASampleGrads = ones(1,M) / M * aGrads;
@@ -79,23 +82,24 @@ for epoch=1:epochs
     dLb_k__bbar = -ones(M,M)/M .* (bob'./bBar - (1-bob')./(1-bBar));
     dLb_k__bbar = dLb_k__bbar - diag(log(bBar) - log(1-bBar) .* ones(1,M));
 
+    % Derivative of L(b_k, P(B|a_k))
+    dLb_k__PBConda_k = -ones(M,M)/M * (bob' ./ pBConda_k - (1-bob') ./ (1-pBConda_k)) .* ...
+                        (alice'  .* alice / aBar + (1-alice') .* (1-alice) / aBar);
+    dLb_k__PBConda_k = dLb_k__PBConda_k - diag(log(pBConda_k) - log(1-pBConda_k));
+
     % Derivative of H(P(B|a_k))
     dHPBConda_k = -ones(M,M)/M .* (log(pBConda_k) - log(1-pBConda_k)) .* ...
                     (alice' * alice ./ aBar + (1-alice') * (1-alice) ./ (1-aBar));
 
-    % Derivative of L(b_k, P(B|a_k))
-    dLb_k__PBConda_k = -ones(M,M)/M * (log(pBConda_k) - log(1-pBConda_k)) .* ...
-                        (alice'  .* alice / aBar + (1-alice') .* (1-alice) / aBar);
-    dLb_k__PBConda_k = dLb_k__PBConda_k - diag(log(pBConda_k) - log(1-pBConda_k));
 
     bGrads = dLb_k__bbar - dHofBbar + dLb_k__PBConda_k - dHPBConda_k;
     BSampleGrads = ones(1,M) / M * bGrads;
 
     %% Gradient ascend
 
-%     alice = alice + lr * ASampleGrads;
+    alice = alice + lr * ASampleGrads;
     bob = bob + lr * BSampleGrads;
-%     alice = min(max(alice, 0.001), 0.999);
+    alice = min(max(alice, 0.001), 0.999);
     bob = min(max(bob, 0.001), 0.999);
 
 end
