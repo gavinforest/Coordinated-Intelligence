@@ -12,11 +12,11 @@
 numSamples = 4;
 data = (1:numSamples)'; %each sample is a row (like a database row)
 epochs=10000;
-lr = 0.001;
+lr = 0.01;
 
 tic;
-alice = rand(1,numSamples);
-bob = rand(1,numSamples);
+alice = ones(1,numSamples) * 0.5;
+bob = ones(1,numSamples) * 0.5;
 payoff_tracking = zeros(epochs,2);
 
 for epoch=1:epochs
@@ -25,28 +25,30 @@ for epoch=1:epochs
     payoff_tracking(epoch,:) = payoffs;
 
     %% Approximate gradients for Alice
-    aSteps = zeros(1,numSamples);
+    aGrad = zeros(1,numSamples);
     for perturbInd=1:numSamples
         perturbation = zeros(1,numSamples);
         perturbation(perturbInd) = lr;
         perturbedPayoffs = inefficiencyPayoffs(data, alice + perturbation, bob);
-        aSteps(perturbInd) = lr * (perturbedPayoffs(1) > payoffs(1)) ...
-                            - lr * (perturbedPayoffs(1) < payoffs(1));
+        aGrad(perturbInd) = (perturbedPayoffs(1) - payoffs(1))/lr;
     end
+    aGrad = aGrad / norm(aGrad);
 
     %% Approximatee gradients for Bob
-    bSteps = zeros(1, numSamples);
+    bGrad = zeros(1, numSamples);
     for perturbInd=1:numSamples
         perturbation = zeros(1,numSamples);
         perturbation(perturbInd) = lr;
         perturbedPayoffs = inefficiencyPayoffs(data, alice, bob + perturbation);
-        bSteps(perturbInd) = lr * (perturbedPayoffs(2) > payoffs(2)) ...
-                            - lr * (perturbedPayoffs(2) < payoffs(2));
+        bGrad(perturbInd) = (perturbedPayoffs(2) - payoffs(2)) / lr;
     end
+    bGrad = bGrad / norm(bGrad);
 
     %% Gradient ascend payoffs
-    alice = alice + aSteps;
-    bob = bob + bSteps;
+    aliceNoise = (rand(size(aGrad)) - 0.5) * lr^2;
+    bobNoise = (rand(size(bGrad)) - 0.5) * lr^2;
+    alice = alice + lr * aGrad + aliceNoise;
+    bob = bob + lr * bGrad + bobNoise;
 
     alice = min(max(alice, 0.001), 0.999);
     bob = min(max(bob, 0.001), 0.999);
