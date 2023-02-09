@@ -11,132 +11,130 @@
 
 M = 4;
 data = (1:M)'; %each sample is a row (like a database row)
-epochs=10000;
-lr = 0.1;
+lr = 0.001;
 
 tic;
 alice = rand(1,4);
 bob = rand(1,4);
-payoff_tracking = zeros(epochs,2);
-
-for epoch=1:epochs
-    %% Track payoffs
-    payoffs = inefficiencyPayoffs(data, alice, bob);
-    payoff_tracking(epoch,:) = payoffs;
-
-    %% Calculate statistics
-    jDist = jointDistribution(data, alice, bob);
-    aDist = jDist * [1;1];
-    aBar = aDist(1);
-    bDist = [1 1] * jDist;
-    bBar = bDist(1);
-
-    distACondB = jDist * [1;0];
-    distACondB = distACondB / sum(distACondB);
-    pACondB = distACondB(1);
-    distACondBc = jDist * [0;1];
-    distACondBc = distACondBc / sum(distACondBc);
-    pACondBc = distACondBc(1);
-
-    distBCondA = [1 0 ] * jDist;
-    distBCondA = distBCondA / sum(distBCondA);
-    pBCondA = distBCondA(1);
-    distBCondAc = [0 1] * jDist;
-    distBCondAc = distBCondAc / sum(distBCondAc);
-    pBCondAc = distBCondAc(1);
-
-    %% Calculate samplewise conditionals
-    pACondb_k = pACondB * bob' + pACondBc * (1-bob');
-    pBConda_k = pBCondA * alice' + pBCondAc * (1-alice');
-
-    
-    %% Calculate Alice gradients
-    %aGrad(k,i) = d pi_a_k / d a_i
-    
-    % Derivative of H(abar).
-    dHofAbar = - ones(M,M) / M * (log(aBar) - log(1-aBar));
-    
-    % Derivative of L(a_k, abar)
-    dLa_k__abar = -ones(M,M)/M .* (alice'./aBar - (1-alice')./(1-aBar));
-    dLa_k__abar = dLa_k__abar - diag(log(aBar) - log(1-aBar) .* ones(1,M));
-
-    % Derivative of L(a_k, P(A|b_k))
-    dLa_k__PACondb_k = -ones(M,M)/M * (alice' ./ pACondb_k - (1-alice') ./ (1-pACondb_k)) .* ...
-                        (bob'  .* bob / bBar + (1-bob') .* (1-bob) / bBar);
-    dLa_k__PACondb_k = dLa_k__PACondb_k - diag(log(pACondb_k) - log(1-pACondb_k));
-
-    % Derivative of H(P(A|b_k))
-    dHPACondb_k = -ones(M,M)/M .* (log(pACondb_k) - log(1-pACondb_k)) .* ...
-                    (bob' .* bob ./ bBar + (1-bob') .* (1-bob) ./ (1-bBar));
-
-    aGrads = dLa_k__abar - dHofAbar + dLa_k__PACondb_k - dHPACondb_k;
-    ASampleGrads = ones(1,M) / M * aGrads;
-
-    %% Calculate Bob gradients
-    %bGrad(k,i) = d pi_b_k / d b_i
-    
-    % Derivative of H(bbar).
-    dHofBbar = - ones(M,M) / M * (log(bBar) - log(1-bBar));
-    
-    % Derivative of L(b_k, bbar)
-    dLb_k__bbar = -ones(M,M)/M .* (bob'./bBar - (1-bob')./(1-bBar));
-    dLb_k__bbar = dLb_k__bbar - diag(log(bBar) - log(1-bBar) .* ones(1,M));
-
-    % Derivative of L(b_k, P(B|a_k))
-    dLb_k__PBConda_k = -ones(M,M)/M * (bob' ./ pBConda_k - (1-bob') ./ (1-pBConda_k)) .* ...
-                        (alice'  .* alice / aBar + (1-alice') .* (1-alice) / aBar);
-    dLb_k__PBConda_k = dLb_k__PBConda_k - diag(log(pBConda_k) - log(1-pBConda_k));
-
-    % Derivative of H(P(B|a_k))
-    dHPBConda_k = -ones(M,M)/M .* (log(pBConda_k) - log(1-pBConda_k)) .* ...
-                    (alice' * alice ./ aBar + (1-alice') * (1-alice) ./ (1-aBar));
 
 
-    bGrads = dLb_k__bbar - dHofBbar + dLb_k__PBConda_k - dHPBConda_k;
-    BSampleGrads = ones(1,M) / M * bGrads;
+%% Calculate statistics
+jDist = jointDistribution(data, alice, bob);
+aDist = jDist * [1;1];
+aBar = aDist(1);
+bDist = [1 1] * jDist;
+bBar = bDist(1);
 
-    %% Gradient ascend
+distACondB = jDist * [1;0];
+distACondB = distACondB / sum(distACondB);
+pACondB = distACondB(1);
+distACondBc = jDist * [0;1];
+distACondBc = distACondBc / sum(distACondBc);
+pACondBc = distACondBc(1);
 
-    alice = alice + lr * ASampleGrads;
-    bob = bob + lr * BSampleGrads;
-    alice = min(max(alice, 0.001), 0.999);
-    bob = min(max(bob, 0.001), 0.999);
+distBCondA = [1 0 ] * jDist;
+distBCondA = distBCondA / sum(distBCondA);
+pBCondA = distBCondA(1);
+distBCondAc = [0 1] * jDist;
+distBCondAc = distBCondAc / sum(distBCondAc);
+pBCondAc = distBCondAc(1);
 
+%% Calculate samplewise conditionals
+pACondb_k = pACondB * bob' + pACondBc * (1-bob');
+pBConda_k = pBCondA * alice' + pBCondAc * (1-alice');
+
+
+%% Calculate Alice gradients
+%aGrad(k,i) = d pi_a_k / d a_i
+
+% Derivative of H(abar).
+dHAbar = - ones(M,M) / M * (log(aBar) - log(1-aBar));
+
+% Derivative of L(a_k, abar)
+dLa_k__abar = -ones(M,M)/M .* (alice'./aBar - (1-alice')./(1-aBar));
+dLa_k__abar = dLa_k__abar - diag(log(aBar) - log(1-aBar) .* ones(1,M));
+
+% Derivative of L(a_k, P(A|b_k))
+dLa_k__PACondb_k = -ones(M,M)/M * (alice' ./ pACondb_k - (1-alice') ./ (1-pACondb_k)) .* ...
+    (bob'  .* bob / bBar + (1-bob') .* (1-bob) / bBar);
+dLa_k__PACondb_k = dLa_k__PACondb_k - diag(log(pACondb_k) - log(1-pACondb_k));
+
+% Derivative of H(P(A|b_k))
+dHPACondb_k = -ones(M,M)/M .* (log(pACondb_k) - log(1-pACondb_k)) .* ...
+    (bob' .* bob ./ bBar + (1-bob') .* (1-bob) ./ (1-bBar));
+
+aGrads = dLa_k__abar - dHAbar + dLa_k__PACondb_k - dHPACondb_k;
+ASampleGrads = ones(1,M) / M * aGrads;
+
+%% Approximate Alice gradients with small perturbations
+perturbationGrads = zeros(4, M, M);
+ogInefficiencyTensor = inefficiencyTensor(jDist, data, alice, bob);
+for s=1:M
+    perturbation = zeros(size(alice));
+    perturbation(s) = lr;
+    perturbedAlice = alice + perturbation;
+
+    perturbedJDist = jointDistribution(data, perturbedAlice, bob);
+    perturbedIneffTensor = inefficiencyTensor(perturbedJDist, data, perturbedAlice, bob);
+
+
+    perturbationGrads(:, :, s) = (ogInefficiencyTensor(:,:,1) - perturbedIneffTensor(:,:,1)) / lr;
 end
+
+approxDLa_k__abar= permute(perturbationGrads(1,:,:), [2 3 1]);
+approxDHAbar = permute(perturbationGrads(2,:,:), [2 3 1]);
+approxDLa_k__PACondb_k = permute(perturbationGrads(3,:,:), [2 3 1]);
+approxDHPACondb_k = permute(perturbationGrads(4, :,:), [2 3 1]);
+
+
+
+
+
+
+%% Local Functions
     
 function [payoffs] = inefficiencyPayoffs(data, alice, bob)
     jDist = jointDistribution(data, alice, bob);
-    averageInefficiencies = inefficiencyMatrix(jDist, data, alice, bob);
-    payoffs  =  sum(averageInefficiencies,2)';
+    inefficiencyTensory = inefficiencyTensor(jDist, data, alice, bob);
+    signs = [1 -1 1 -1]';
+    payoffs = mean(inefficiencyTensory .* signs, [1 2]);
 end
 
-function [averageInefficiencies]= inefficiencyMatrix(jDist, data, alice, bob)
-    averageInefficiencies = zeros(2,2);
-    % alice unconditional entropy
+function [ent] = L(a, p)
+    ent = -(a .* log(p) + (1-a) .* log(1-p));
+end
+
+function [ent] = H(p)
+    ent = -(p .* log(p) + (1-p) .* log(1-p));
+end
+
+function [inefficiencyTensor]= inefficiencyTensor(jDist, data, alice, bob)
+    M = size(data, 1);
+    inefficiencyTensor = zeros(4,M,2);
+
     pA = sum(jDist,2);
     pA = pA(1);
-    % bob unconditional entropy
     pB = sum(jDist, 1);
     pB = pB(1);
 
-    numSamples = size(data,1);
-    for sampleInd = 1:numSamples
+    for sampleInd = 1:M
         s = data(sampleInd,:);
         pASamp = alice(s);
         pBSamp = bob(s);
     
         % Conditional probabilities
-        pACondB = jDist * [pBSamp; 1-pBSamp];
-        pACondB  = pACondB  / sum(pACondB);
-        pACondB = pACondB(1);
-        pBCondA = [pASamp 1-pASamp] * jDist;
-        pBCondA = pBCondA / sum(pBCondA);
-        pBCondA = pBCondA(1);
+        pACondBk = jDist * [pBSamp; 1-pBSamp];
+        pACondBk  = pACondBk  / sum(pACondBk);
+        pACondBk = pACondBk(1);
+        pBCondAk = [pASamp 1-pASamp] * jDist;
+        pBCondAk = pBCondAk / sum(pBCondAk);
+        pBCondAk = pBCondAk(1);
     
-        sampleIneffs = [codingInefficiency(pASamp, pA) codingInefficiency(pASamp, pACondB);
-                        codingInefficiency(pBSamp, pBCondA) codingInefficiency(pBSamp, pB)];
+        aliceIneffs = [L(pASamp, pA) H(pA) L(pASamp, pACondBk) H(pACondBk)];
+        bobIneffs = [L(pBSamp, pB) H(pB) L(pBSamp, pBCondAk) H(pBCondAk)];
         
-        averageInefficiencies = averageInefficiencies + sampleIneffs/numSamples;
+        inefficiencyTensor(:, sampleInd, 1) = aliceIneffs';
+        inefficiencyTensor(:, sampleInd, 2) = bobIneffs';
     end
 
 end
@@ -151,22 +149,4 @@ function [jDist] = jointDistribution(data, alice, bob)
         jDist = jDist  + sampleJoint / numSamples;
     end
 
-end
-
-function [ineff] = codingInefficiency(trueProb, codingProb)
-    ineff = - (trueProb*logcl(codingProb) + (1-trueProb)*logcl(1-codingProb)) - binent(trueProb);
-end
-
-function [ent] = binent(p)
-    if p == 0
-        ent = 0;
-        return;
-    end
-    ent = - (p.*logcl(p) + (1-p).*logcl(1-p));
-end
-
-function [y] = logcl(x)
-    mask = x<=0;
-    y = log2(x);
-    y(mask) = 0;
 end
