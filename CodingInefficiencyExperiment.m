@@ -11,7 +11,7 @@
 
 M = 4;
 data = (1:M)'; %each sample is a row (like a database row)
-lr = 0.001;
+lr = 0.01;
 epochs = 1e4;
 payoff_tracking = zeros(epochs, 2);
 
@@ -54,8 +54,8 @@ for epoch=1:epochs
     %% Calculate Alice gradients
     %aGrad(k,i) = d pi_a_k / d a_i
     
-    % Derivative of H(abar).
-    dHAbar = - ones(M,M) / M * (log(aBar) - log(1-aBar));
+    % Derivative of H(a_k).
+    dHa_k = - diag(log(alice) - log(1-alice));
     
     % Derivative of L(a_k, abar)
     dLa_k__abar = -ones(M,M)/M .* (alice'./aBar - (1-alice')./(1-aBar));
@@ -66,14 +66,34 @@ for epoch=1:epochs
         (bob'  .* bob / bBar + (1-bob') .* (1-bob) / (1-bBar));
     dLa_k__PACondb_k = dLa_k__PACondb_k - diag(log(pACondb_k) - log(1-pACondb_k));
     
-    % Derivative of H(P(A|b_k))
-    dHPACondb_k = -ones(M,M)/M .* (log(pACondb_k) - log(1-pACondb_k)) .* ...
-        (bob' .* bob ./ bBar + (1-bob') .* (1-bob) ./ (1-bBar));
     
-    aGrads = dLa_k__abar - dHAbar + dLa_k__PACondb_k - dHPACondb_k;
+    aGrads = dLa_k__abar + dLa_k__PACondb_k - 2 * dHa_k;
     ASampleGrads = ones(1,M) / M * aGrads;
-    
 
+    %% Calculate Bob gradients
+    %bGrad(k,i) = d pi_a_k / d a_i
+    
+    % Derivative of H(a_k).
+    dHb_k = - diag(log(bob) - log(1-bob));
+    
+    % Derivative of L(a_k, abar)
+    dLb_k__bbar = -ones(M,M)/M .* (bob'./bBar - (1-bob')./(1-bBar));
+    dLb_k__bbar = dLb_k__bbar - diag(log(bBar) - log(1-bBar) .* ones(1,M));
+    
+    % Derivative of L(a_k, P(A|b_k))
+    dLb_k__PBConda_k = -ones(M,M)/M .* (bob' ./ pBConda_k - (1-bob') ./ (1-pBConda_k)) .* ...
+        (alice'  .* alice / aBar + (1-alice') .* (1-alice) / (1-aBar));
+    dLb_k__PBConda_k = dLb_k__PBConda_k - diag(log(pBConda_k) - log(1-pBConda_k));
+    
+    
+    bGrads = dLb_k__bbar + dLb_k__PBConda_k - 2 * dHb_k;
+    BSampleGrads = ones(1,M) / M * bGrads;
+    
+    %% Gradient ascend payoffs
+    alice = alice + lr * ASampleGrads / norm(ASampleGrads);
+    bob = bob + lr * BSampleGrads / norm(BSampleGrads);
+    alice = max(min(alice, 0.999), 0.001);
+    bob = max(min(bob, 0.999), 0.001);
 end
 
 
@@ -117,8 +137,8 @@ function [inefficiencyTensor]= inefficiencyTensor(jDist, data, alice, bob)
         pBCondAk = pBCondAk / sum(pBCondAk);
         pBCondAk = pBCondAk(1);
     
-        aliceIneffs = [L(pASamp, pA) H(pA) L(pASamp, pACondBk) H(pACondBk)];
-        bobIneffs = [L(pBSamp, pB) H(pB) L(pBSamp, pBCondAk) H(pBCondAk)];
+        aliceIneffs = [L(pASamp, pA) H(pASamp) L(pASamp, pACondBk) H(pASamp)];
+        bobIneffs = [L(pBSamp, pB) H(pBSamp) L(pBSamp, pBCondAk) H(pBSamp)];
         
         inefficiencyTensor(:, sampleInd, 1) = aliceIneffs';
         inefficiencyTensor(:, sampleInd, 2) = bobIneffs';
