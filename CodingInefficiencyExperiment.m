@@ -55,8 +55,8 @@ dLa_k__abar = -ones(M,M)/M .* (alice'./aBar - (1-alice')./(1-aBar));
 dLa_k__abar = dLa_k__abar - diag(log(aBar) - log(1-aBar) .* ones(1,M));
 
 % Derivative of L(a_k, P(A|b_k))
-dLa_k__PACondb_k = -ones(M,M)/M * (alice' ./ pACondb_k - (1-alice') ./ (1-pACondb_k)) .* ...
-    (bob'  .* bob / bBar + (1-bob') .* (1-bob) / bBar);
+dLa_k__PACondb_k = -ones(M,M)/M .* (alice' ./ pACondb_k - (1-alice') ./ (1-pACondb_k)) .* ...
+    (bob'  .* bob / bBar + (1-bob') .* (1-bob) / (1-bBar));
 dLa_k__PACondb_k = dLa_k__PACondb_k - diag(log(pACondb_k) - log(1-pACondb_k));
 
 % Derivative of H(P(A|b_k))
@@ -78,16 +78,13 @@ for s=1:M
     perturbedIneffTensor = inefficiencyTensor(perturbedJDist, data, perturbedAlice, bob);
 
 
-    perturbationGrads(:, :, s) = (ogInefficiencyTensor(:,:,1) - perturbedIneffTensor(:,:,1)) / lr;
+    perturbationGrads(:, :, s) = (perturbedIneffTensor(:,:,1) - ogInefficiencyTensor(:,:,1)) / lr;
 end
 
 approxDLa_k__abar= permute(perturbationGrads(1,:,:), [2 3 1]);
 approxDHAbar = permute(perturbationGrads(2,:,:), [2 3 1]);
 approxDLa_k__PACondb_k = permute(perturbationGrads(3,:,:), [2 3 1]);
 approxDHPACondb_k = permute(perturbationGrads(4, :,:), [2 3 1]);
-
-
-
 
 
 
