@@ -11,7 +11,7 @@
 
 M = 4;
 data = (1:M)'; %each sample is a row (like a database row)
-lr = 0.01;
+lr = 0.001;
 epochs = 1e4;
 payoff_tracking = zeros(epochs, 2);
 
@@ -90,8 +90,8 @@ for epoch=1:epochs
     BSampleGrads = ones(1,M) / M * bGrads;
     
     %% Gradient ascend payoffs
-    alice = alice + lr * ASampleGrads / norm(ASampleGrads);
-    bob = bob + lr * BSampleGrads / norm(BSampleGrads);
+    alice = alice + lr * ASampleGrads + (rand(1,4) - 0.5) * lr;
+    bob = bob + lr * BSampleGrads + (rand(1,4) - 0.5) * lr;
     alice = max(min(alice, 0.999), 0.001);
     bob = max(min(bob, 0.999), 0.001);
 end
@@ -104,7 +104,7 @@ function [payoffs] = inefficiencyPayoffs(data, alice, bob)
     jDist = jointDistribution(data, alice, bob);
     ineffTensor = inefficiencyTensor(jDist, data, alice, bob);
     signs = [1 -1 1 -1]';
-    payoffs = mean(ineffTensor .* signs, [1 2]);
+    payoffs = mean(ineffTensor .* signs, [1 2]) * 4;
 end
 
 function [ent] = L(a, p)

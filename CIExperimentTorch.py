@@ -7,27 +7,13 @@ Created on Mon Feb 13 16:56:29 2023
 """
 import torch
 import time
-def synthesizeData(means, stdDevs, samps):
-    dists = [torch.randn(samps, 1) * stdDev + mean for (mean, stdDev) in zip(means, stdDevs)]
-    return torch.cat(dists, dim=0)
-syntheticData = synthesizeData([-2, 2, 6, -6], [0.5, 0.5, 0.5, 0.5], 1)
-class LogisticRegression(torch.nn.Module):
-     def __init__(self, input_dim, output_dim):
-         super(LogisticRegression, self).__init__()
-         self.linear_relu_stack = torch.nn.Sequential(
-             torch.nn.Linear(1, 20),
-             torch.nn.ReLU(),
-             torch.nn.Linear(20, 20),
-             torch.nn.ReLU(),
-             torch.nn.Linear(20, 1))
-     def forward(self, x):
-         outputs = torch.sigmoid(self.linear_relu_stack(x)) * 0.98 + 0.01
-         return outputs
-     
-     
-aliceModel = LogisticRegression(1, 1)
-bobModel = LogisticRegression(1,1)
-epochs = 1000
+
+M = 4
+# alice = torch.tensor([0.01, 0.01, 0.99, 0.99], dtype = torch.float64).t()
+# bob = torch.tensor([0.01, 0.01, 0.99, 0.99], dtype = torch.float64).t()
+alice = torch.rand(M,1)
+bob = torch.rand(M,1)
+epochs = 5000
 lr = 0.01
 
 def codinginefficiency(joint, a, b):
@@ -74,47 +60,36 @@ def L(a,p):
 payoff_tracking = torch.zeros(epochs, 2, requires_grad=False)
 start_time = time.time()
 for epoch in range(epochs):
-    alice = aliceModel(syntheticData)
-    bob = bobModel(syntheticData)
-    alice.retain_grad()
-    bob.retain_grad()
-    
+    alice.requires_grad_(True)
+    bob.requires_grad_(True)
+
     joint = jointDistribution(alice, bob)
     
-    losses = codinginefficiency(joint, alice, bob)
-    payoff_tracking[epoch,:] = losses.detach()
-    aliceLoss = losses[0]
-    bobLoss = losses[1]
+    payoffs = codinginefficiency(joint, alice, bob)
+    payoff_tracking[epoch,:] = payoffs.detach()
+    alicePayoff = payoffs[0]
+    bobPayoff = payoffs[1]
+    
     
     # Calculate Alice grads
-    bobModel.requires_grad_(False)
-    aliceLoss.backward(retain_graph = True)
+    # bob.requires_grad_(False)
+    alicePayoff.backward(retain_graph = True)
     
     # Calculate Bob grads
-    bobModel.requires_grad_(True)
-    aliceModel.requires_grad_(False)
-    bobLoss.backward()
+    # bob.requires_grad_(True)
+    # alice.requires_grad_(False)
+    bobPayoff.backward()
     
     # Restore requires_grad to defauts
-    aliceModel.requires_grad_(True)
-    bobModel.requires_grad_(True)
+    alice.requires_grad_(True)
+    bob.requires_grad_(True)
     
     # Gradient ascend Alice and Bob
     with torch.no_grad():
-        for p in aliceModel.parameters():
-            scale = 1 / torch.norm(p.grad)
-            if torch.any(torch.isnan(scale)):
-                scale = 1
-            p += p.grad * scale * lr + (torch.rand_like(p) -0.5) * lr**2
-            
-        for p in bobModel.parameters():
-            scale = 1 / torch.norm(p.grad)
-            if torch.any(torch.isnan(scale)):
-                scale = 1
-            p += p.grad * scale * lr + (torch.rand_like(p) -0.5) * lr**2
-            
-        aliceModel.zero_grad()
-        bobModel.zero_grad()
+        alice = alice + alice.grad * lr + (torch.rand_like(alice) - 0.5) * lr
+        alice = torch.minimum(torch.maximum(alice, torch.tensor(0.001)), torch.tensor(0.999))
+        bob = bob + bob.grad * lr + (torch.rand_like(bob) -0.5) * lr
+        bob = torch.minimum(torch.maximum(bob, torch.tensor(0.001)), torch.tensor(0.999))
 
 print("Took ", time.time() - start_time)
 
