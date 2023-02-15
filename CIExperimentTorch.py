@@ -10,7 +10,7 @@ import time
 def synthesizeData(means, stdDevs, samps):
     dists = [torch.randn(samps, 1) * stdDev + mean for (mean, stdDev) in zip(means, stdDevs)]
     return torch.cat(dists, dim=0)
-syntheticData = synthesizeData([-2, 2, 6, -6], [0.5, 0.5, 0.5, 0.5], 1)
+syntheticData = synthesizeData([-2, 2, 6, -6], [0.5, 0.5, 0.5, 0.5], 100)
 class LogisticRegression(torch.nn.Module):
      def __init__(self, input_dim, output_dim):
          super(LogisticRegression, self).__init__()
@@ -27,7 +27,7 @@ class LogisticRegression(torch.nn.Module):
      
 aliceModel = LogisticRegression(1, 1)
 bobModel = LogisticRegression(1,1)
-epochs = 1000
+epochs = 5000
 lr = 0.01
 
 def codinginefficiency(joint, a, b):
@@ -81,40 +81,19 @@ for epoch in range(epochs):
     
     joint = jointDistribution(alice, bob)
     
-    losses = codinginefficiency(joint, alice, bob)
-    payoff_tracking[epoch,:] = losses.detach()
-    aliceLoss = losses[0]
-    bobLoss = losses[1]
+    payoffs = codinginefficiency(joint, alice, bob)
+    payoff_tracking[epoch,:] = payoffs.detach()
+    socialgood = sum(payoffs)
     
-    # Calculate Alice grads
-    bobModel.requires_grad_(False)
-    aliceLoss.backward(retain_graph = True)
-    
-    # Calculate Bob grads
-    bobModel.requires_grad_(True)
-    aliceModel.requires_grad_(False)
-    bobLoss.backward()
-    
-    # Restore requires_grad to defauts
-    aliceModel.requires_grad_(True)
-    bobModel.requires_grad_(True)
+    # Calculate social payoff gradients
+    socialgood.backward()
     
     # Gradient ascend Alice and Bob
     with torch.no_grad():
-        for p in aliceModel.parameters():
-            scale = 1 / torch.norm(p.grad)
-            if torch.any(torch.isnan(scale)):
-                scale = 1
-            p += p.grad * scale * lr + (torch.rand_like(p) -0.5) * lr**2
-            
-        for p in bobModel.parameters():
-            scale = 1 / torch.norm(p.grad)
-            if torch.any(torch.isnan(scale)):
-                scale = 1
-            p += p.grad * scale * lr + (torch.rand_like(p) -0.5) * lr**2
-            
-        aliceModel.zero_grad()
-        bobModel.zero_grad()
+        for model in [aliceModel, bobModel]:
+            for p in model.parameters():
+                p += p.grad * lr
+            model.zero_grad()
 
 print("Took ", time.time() - start_time)
 
