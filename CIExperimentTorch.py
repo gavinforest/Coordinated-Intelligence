@@ -7,13 +7,15 @@ Created on Mon Feb 13 16:56:29 2023
 """
 import torch
 import time
+
 def synthesizeData(means, stdDevs, samps):
     dists = [torch.randn(samps, 1) * stdDev + mean for (mean, stdDev) in zip(means, stdDevs)]
     return torch.cat(dists, dim=0)
-syntheticData = synthesizeData([-2, 2, 6, -6], [0.5, 0.5, 0.5, 0.5], 100)
-class LogisticRegression(torch.nn.Module):
+dataset = torch.utils.data.TensorDataset(synthesizeData([-2, 2, 6, -6], [0.5, 0.5, 0.5, 0.5], 128))
+dataloader = torch.utils.data.DataLoader(dataset,  batch_size=16, shuffle=True)
+class Classifier(torch.nn.Module):
      def __init__(self, input_dim, output_dim):
-         super(LogisticRegression, self).__init__()
+         super(Classifier, self).__init__()
          self.linear_relu_stack = torch.nn.Sequential(
              torch.nn.Linear(1, 20),
              torch.nn.ReLU(),
@@ -25,9 +27,9 @@ class LogisticRegression(torch.nn.Module):
          return outputs
      
      
-aliceModel = LogisticRegression(1, 1)
-bobModel = LogisticRegression(1,1)
-epochs = 5000
+aliceModel = Classifier(1, 1)
+bobModel = Classifier(1,1)
+epochs = 1000
 lr = 0.01
 
 def codinginefficiency(joint, a, b):
@@ -74,26 +76,32 @@ def L(a,p):
 payoff_tracking = torch.zeros(epochs, 2, requires_grad=False)
 start_time = time.time()
 for epoch in range(epochs):
-    alice = aliceModel(syntheticData)
-    bob = bobModel(syntheticData)
-    alice.retain_grad()
-    bob.retain_grad()
+    numBatches = len(dataloader) #assuming of equal size!
+    batch_payoffs = torch.zeros(numBatches, 2)
+    for (batchInd, batchedTensors) in enumerate(dataloader):
+        batch = batchedTensors[0]
+        alice = aliceModel(batch)
+        bob = bobModel(batch)
+        alice.retain_grad()
+        bob.retain_grad()
+        
+        joint = jointDistribution(alice, bob)
+        
+        payoffs = codinginefficiency(joint, alice, bob)
+        batch_payoffs[batchInd,:] = payoffs.detach()
+        socialgood = sum(payoffs)
+        
+        # Calculate social payoff gradients
+        socialgood.backward()
+        
+        # Gradient ascend Alice and Bob
+        with torch.no_grad():
+            for model in [aliceModel, bobModel]:
+                for p in model.parameters():
+                    p += p.grad * lr
+                model.zero_grad()
     
-    joint = jointDistribution(alice, bob)
-    
-    payoffs = codinginefficiency(joint, alice, bob)
-    payoff_tracking[epoch,:] = payoffs.detach()
-    socialgood = sum(payoffs)
-    
-    # Calculate social payoff gradients
-    socialgood.backward()
-    
-    # Gradient ascend Alice and Bob
-    with torch.no_grad():
-        for model in [aliceModel, bobModel]:
-            for p in model.parameters():
-                p += p.grad * lr
-            model.zero_grad()
+    payoff_tracking[epoch, :]= torch.mean(batch_payoffs, dim=0)
 
 print("Took ", time.time() - start_time)
 
