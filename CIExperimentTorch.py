@@ -79,10 +79,10 @@ def jointDistribution(probabilityTensor):
     return joint
     
 def H(p):
-    return -(p * torch.log(p) + (1-p) * torch.log(1-p))
+    return -(p * torch.log2(p) + (1-p) * torch.log2(1-p))
 
 def L(a,p):
-    return -(a * torch.log(p) + (1-a) * torch.log(1-p))
+    return -(a * torch.log2(p) + (1-a) * torch.log2(1-p))
 
 # ----------------------------------------------------
 #               Datasets and Data Loaders
@@ -103,7 +103,7 @@ test_data = datasets.FashionMNIST(
     download=True,
     transform=ToTensor(),
 )
-batch_size = 64
+batch_size = 128
 # Create data loaders.
 train_dataloader = DataLoader(training_data, batch_size=batch_size)
 test_dataloader = DataLoader(test_data, batch_size=batch_size)
@@ -119,6 +119,7 @@ print(f"Using {device} device")
 output_dim = 20
 aliceModel = Classifier(28 * 28, output_dim).to(device)
 bobModel = Classifier(28*28,output_dim).to(device)
+max_bits_possible = (output_dim * 2) ** 2
 
 ineffBalance = output_dim * 2 - 1
 epochs = 5
@@ -134,13 +135,20 @@ for epoch in range(epochs):
     numBatches = len(train_dataloader) #assuming of equal size!
     totalSize = len(train_dataloader.dataset)
     batch_payoffs = torch.zeros(numBatches, output_dim * 2)
+    epoch_joint_AB = torch.zeros(output_dim * 2, output_dim * 2)
+    epoch_joint_ABc = torch.zeros_like(epoch_joint_AB)
+    epoch_outputs = torch.zeros(totalSize, output_dim * 2)
     for batchInd, (batch, _) in enumerate(train_dataloader):
         alice = aliceModel(batch)
         bob = bobModel(batch)
         
         outputs = torch.cat([alice, bob], dim=1)
+        epoch_outputs[(batchInd * batch_size):((batchInd + 1) * batch_size), :] = outputs.detach()
         
         joint = jointDistribution(outputs)
+        (AB, ABc) = joint
+        epoch_joint_AB += AB.detach() / numBatches
+        epoch_joint_ABc += ABc.detach() / numBatches
         
         payoffs = codinginefficiency(joint, outputs)
         batch_payoffs[batchInd,:] = payoffs.detach()
@@ -156,11 +164,17 @@ for epoch in range(epochs):
                     p += p.grad * lr
                 model.zero_grad()
         
-        if batchInd % 100 == 0:
+        if batchInd % 100 == 99:
             sampleCount = (batchInd + 1) * len(batch)
             print(f"socialgood: {socialgood.item():>7f}  [{sampleCount:>5d}/{totalSize:>5d}]")
     
-    payoff_tracking[epoch, :]= torch.mean(batch_payoffs, dim=0)
+    epoch_payoffs = codinginefficiency((epoch_joint_AB, epoch_joint_ABc), epoch_outputs)
+    epoch_social_good = torch.sum(epoch_payoffs)
+    payoff_tracking[epoch, :]= epoch_payoffs
+    
+    print(f"\n EPOCH: {epoch}    \n\
+          \t average social good: {epoch_social_good} bits    \n\
+          \t percent of capacity: {epoch_social_good / max_bits_possible * 100} %\n")
 
 print("Took ", time.time() - start_time)
 
