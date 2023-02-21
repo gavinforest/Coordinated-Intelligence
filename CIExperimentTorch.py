@@ -12,7 +12,7 @@ def synthesizeData(means, stdDevs, samps):
     dists = [torch.randn(samps, 1) * stdDev + mean for (mean, stdDev) in zip(means, stdDevs)]
     return torch.cat(dists, dim=0)
 dataset = torch.utils.data.TensorDataset(synthesizeData([-2, 2, 6, -6], [0.5, 0.5, 0.5, 0.5], 128))
-dataloader = torch.utils.data.DataLoader(dataset,  batch_size=16, shuffle=True)
+dataloader = torch.utils.data.DataLoader(dataset,  batch_size=32, shuffle=True)
 class Classifier(torch.nn.Module):
      def __init__(self, input_dim, output_dim):
          super(Classifier, self).__init__()
@@ -29,42 +29,58 @@ class Classifier(torch.nn.Module):
      
 aliceModel = Classifier(1, 1)
 bobModel = Classifier(1,1)
-epochs = 1000
+ineffBalance = 1.0
+epochs = 400
 lr = 0.01
 
-def codinginefficiency(joint, a, b):
-    M = len(a)
-    pA = torch.sum(joint, 1)[0]
-    pB = torch.sum(joint, 0)[0]
+def codinginefficiency(joint, probabilityTensor):
+    (M,N) = probabilityTensor.shape
     
-    # Conditional probabilities
-    pACondB = joint[0, 0] / pB
-    pACondBc = joint[0,1] / (1-pB)
-    pBCondA = joint[0, 0] / pA
-    pBCondAc = joint[1,0] / (1-pA)
+    (AB, ABc) = joint
     
-    pACondb_k = pACondB * b + pACondBc * (1-b)
-    pBConda_k = pBCondA * a + pBCondAc * (1-a)
+    unconditionals = torch.diagonal(AB)
     
-    aIneffs = 1/M * torch.sum(L(a, pA) + L(a, pACondb_k) - 2 * H(a))
-    bIneffs = 1/M * torch.sum(L(b, pB) + L(b, pBConda_k) - 2 * H(b))
+    conditional = AB / unconditionals #unconditionals is a row vector
+    conditionalComp = ABc / (1-unconditionals)
     
-    # Torch autograd can't handle things like torch.tensor([aIneffs, bIneffs])
-    # so have to get a bit elaborite
-    return aIneffs * torch.tensor([1,0]) +  bIneffs * torch.tensor([0,1])
+    expandedProbTensor = probabilityTensor.t().view(1,N,M).expand(N,N,M)
+    sampleConditionals = conditional.view(N,N,1).expand(N,N,M) * expandedProbTensor + \
+                         conditionalComp.view(N,N,1).expand(N,N,M) * (1-expandedProbTensor)
+    
+    # sampleConditionals(i,j,k) = P(logit i | logit j_k)
+    # expandedProbTensor(i,j,k) = logit j_k
+    
+    transProbTensor = expandedProbTensor.transpose(0,1)
+    # transProbTensor(i,j,k) = logit i_k
+    pairwiseIneffs = L(transProbTensor, sampleConditionals) - H(transProbTensor)
+    avgPairwiseIneffs = torch.mean(pairwiseIneffs, dim=2)
+    avgPairwiseIneffs.fill_diagonal_(0) # no self pairwise inefficiences
+    avgExternalIneffs = torch.mean(avgPairwiseIneffs, dim=1) * (N/(N-1)) #account for 0 diagonals
+    
+    selfIneffs = L(probabilityTensor, unconditionals) - H(probabilityTensor)
+    avgSelfIneffs = torch.mean(selfIneffs, dim=0).t()
+    
+    ineffs = avgSelfIneffs + ineffBalance * avgExternalIneffs
+    
+    return ineffs.t()
     
 
-def jointDistribution(a,b):
-    M = len(a)
-    AB = a.t() @ b / M
-    ABc = a.t() @ (1-b) / M
-    AcB = (1-a).t() @ b / M
-    AcBc = (1-a).t() @ (1-b) / M
+def jointDistribution(probabilityTensor):
+    # rows are samples and columns are logits
+    M = probabilityTensor.shape[0]
+    AB = probabilityTensor.t() @ probabilityTensor / M
+    ABc = probabilityTensor.t() @ (1- probabilityTensor) / M
     
-    joint = torch.tensor([[1, 0], [0, 0]]) * AB + \
-           torch.tensor([[0, 1], [0, 0]]) * ABc + \
-           torch.tensor([[0, 0], [1, 0]]) * AcB + \
-           torch.tensor([[0, 0], [0, 1]]) * AcBc
+    # Correct for self-flips being perfectly correlated because they're the same
+    # coin.
+    AB.fill_diagonal_(0)
+    ABc.fill_diagonal_(0)
+    
+    unconditionalProbabilities = torch.mean(probabilityTensor, dim=0)
+    AB += torch.diag(unconditionalProbabilities)
+
+
+    joint = (AB, ABc)
     return joint
     
 def H(p):
@@ -82,12 +98,12 @@ for epoch in range(epochs):
         batch = batchedTensors[0]
         alice = aliceModel(batch)
         bob = bobModel(batch)
-        alice.retain_grad()
-        bob.retain_grad()
         
-        joint = jointDistribution(alice, bob)
+        outputs = torch.cat([alice, bob], dim=1)
         
-        payoffs = codinginefficiency(joint, alice, bob)
+        joint = jointDistribution(outputs)
+        
+        payoffs = codinginefficiency(joint, outputs)
         batch_payoffs[batchInd,:] = payoffs.detach()
         socialgood = sum(payoffs)
         
