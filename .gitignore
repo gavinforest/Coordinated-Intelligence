@@ -130,3 +130,7 @@ dmypy.json
 
 # Matlab autosaves
 *.asv
+
+#### CUSTOM
+
+/data/**

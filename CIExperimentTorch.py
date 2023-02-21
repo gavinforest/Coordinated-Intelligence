@@ -7,31 +7,26 @@ Created on Mon Feb 13 16:56:29 2023
 """
 import torch
 import time
+from torch.utils.data import DataLoader
+from torchvision import datasets
+from torchvision.transforms import ToTensor
 
-def synthesizeData(means, stdDevs, samps):
-    dists = [torch.randn(samps, 1) * stdDev + mean for (mean, stdDev) in zip(means, stdDevs)]
-    return torch.cat(dists, dim=0)
-dataset = torch.utils.data.TensorDataset(synthesizeData([-2, 2, 6, -6], [0.5, 0.5, 0.5, 0.5], 128))
-dataloader = torch.utils.data.DataLoader(dataset,  batch_size=32, shuffle=True)
+# ---------------------------------
+#   Local Functions and Classes
+# ---------------------------------
 class Classifier(torch.nn.Module):
      def __init__(self, input_dim, output_dim):
          super(Classifier, self).__init__()
+         self.flatten = torch.nn.Flatten()
          self.linear_relu_stack = torch.nn.Sequential(
-             torch.nn.Linear(1, 20),
+             torch.nn.Linear(input_dim, 512),
              torch.nn.ReLU(),
-             torch.nn.Linear(20, 20),
+             torch.nn.Linear(512, 512),
              torch.nn.ReLU(),
-             torch.nn.Linear(20, 1))
+             torch.nn.Linear(512, output_dim))
      def forward(self, x):
-         outputs = torch.sigmoid(self.linear_relu_stack(x)) * 0.98 + 0.01
+         outputs = torch.sigmoid(self.linear_relu_stack(self.flatten(x))) * 0.98 + 0.01
          return outputs
-     
-     
-aliceModel = Classifier(1, 1)
-bobModel = Classifier(1,1)
-ineffBalance = 1.0
-epochs = 400
-lr = 0.01
 
 def codinginefficiency(joint, probabilityTensor):
     (M,N) = probabilityTensor.shape
@@ -89,13 +84,57 @@ def H(p):
 def L(a,p):
     return -(a * torch.log(p) + (1-a) * torch.log(1-p))
 
-payoff_tracking = torch.zeros(epochs, 2, requires_grad=False)
+# ----------------------------------------------------
+#               Datasets and Data Loaders
+# ----------------------------------------------------
+
+# Download training data from open datasets.
+training_data = datasets.FashionMNIST(
+    root="data",
+    train=True,
+    download=True,
+    transform=ToTensor(),
+)
+
+# Download test data from open datasets.
+test_data = datasets.FashionMNIST(
+    root="data",
+    train=False,
+    download=True,
+    transform=ToTensor(),
+)
+batch_size = 64
+# Create data loaders.
+train_dataloader = DataLoader(training_data, batch_size=batch_size)
+test_dataloader = DataLoader(test_data, batch_size=batch_size)
+
+# ----------------------------------------------------
+#               Models and Hyperparameters
+# ----------------------------------------------------
+
+# Get cpu or gpu device for training.
+device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+print(f"Using {device} device")
+
+output_dim = 20
+aliceModel = Classifier(28 * 28, output_dim).to(device)
+bobModel = Classifier(28*28,output_dim).to(device)
+
+ineffBalance = output_dim * 2 - 1
+epochs = 5
+lr = 0.01
+
+# ----------------------------------------------------
+#               Encoding Training Loop
+# ----------------------------------------------------
+
+payoff_tracking = torch.zeros(epochs, output_dim * 2, requires_grad=False)
 start_time = time.time()
 for epoch in range(epochs):
-    numBatches = len(dataloader) #assuming of equal size!
-    batch_payoffs = torch.zeros(numBatches, 2)
-    for (batchInd, batchedTensors) in enumerate(dataloader):
-        batch = batchedTensors[0]
+    numBatches = len(train_dataloader) #assuming of equal size!
+    totalSize = len(train_dataloader.dataset)
+    batch_payoffs = torch.zeros(numBatches, output_dim * 2)
+    for batchInd, (batch, _) in enumerate(train_dataloader):
         alice = aliceModel(batch)
         bob = bobModel(batch)
         
@@ -116,6 +155,10 @@ for epoch in range(epochs):
                 for p in model.parameters():
                     p += p.grad * lr
                 model.zero_grad()
+        
+        if batchInd % 100 == 0:
+            sampleCount = (batchInd + 1) * len(batch)
+            print(f"socialgood: {socialgood.item():>7f}  [{sampleCount:>5d}/{totalSize:>5d}]")
     
     payoff_tracking[epoch, :]= torch.mean(batch_payoffs, dim=0)
 
