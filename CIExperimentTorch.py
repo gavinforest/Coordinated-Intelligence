@@ -14,18 +14,33 @@ from torchvision.transforms import ToTensor
 # ---------------------------------
 #   Local Functions and Classes
 # ---------------------------------
-class Classifier(torch.nn.Module):
+class Embedder(torch.nn.Module):
      def __init__(self, input_dim, output_dim):
-         super(Classifier, self).__init__()
+         super(Embedder, self).__init__()
          self.flatten = torch.nn.Flatten()
          self.linear_relu_stack = torch.nn.Sequential(
              torch.nn.Linear(input_dim, 512),
              torch.nn.ReLU(),
-             torch.nn.Linear(512, 512),
+             torch.nn.Linear(512, 1024),
+             torch.nn.ReLU(),
+             torch.nn.Linear(1024, 512),
              torch.nn.ReLU(),
              torch.nn.Linear(512, output_dim))
      def forward(self, x):
-         outputs = torch.sigmoid(self.linear_relu_stack(self.flatten(x))) * 0.98 + 0.01
+         outputs = torch.sigmoid(self.linear_relu_stack(self.flatten(x))) * torch.tensor(0.98).to(device) + torch.tensor(0.01).to(device)
+         return outputs
+
+class Classifier(torch.nn.Module):
+     def __init__(self, input_dim, output_dim):
+         super(Classifier, self).__init__()
+         self.linear_relu_stack = torch.nn.Sequential(
+             torch.nn.Linear(input_dim, 10 * input_dim),
+             torch.nn.ReLU(),
+             torch.nn.Linear(10 * input_dim, 10 * input_dim),
+             torch.nn.ReLU(),
+             torch.nn.Linear(10 * input_dim, output_dim))
+     def forward(self, x):
+         outputs = torch.softmax(self.linear_relu_stack(x), dim=1) * 0.98 + 0.01
          return outputs
 
 def codinginefficiency(joint, probabilityTensor):
@@ -105,7 +120,7 @@ test_data = datasets.FashionMNIST(
 )
 batch_size = 128
 # Create data loaders.
-train_dataloader = DataLoader(training_data, batch_size=batch_size)
+train_dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True)
 test_dataloader = DataLoader(test_data, batch_size=batch_size)
 
 # ----------------------------------------------------
@@ -116,14 +131,38 @@ test_dataloader = DataLoader(test_data, batch_size=batch_size)
 device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 print(f"Using {device} device")
 
-output_dim = 20
-aliceModel = Classifier(28 * 28, output_dim).to(device)
-bobModel = Classifier(28*28,output_dim).to(device)
+output_dim = 50
+aliceModel = Embedder(28 * 28, output_dim).to(device)
+bobModel = Embedder(28*28,output_dim).to(device)
 max_bits_possible = (output_dim * 2) ** 2
 
+eveModel = Classifier(output_dim * 2, 10).to(device)
+classifier_loss_fn = torch.nn.CrossEntropyLoss()
+classifier_optimizer = torch.optim.Adam(eveModel.parameters(), lr = 0.01)
+
 ineffBalance = output_dim * 2 - 1
-epochs = 5
-lr = 0.01
+epochs = 50
+lr = 0.005
+
+def test(dataloader, alice, bob, eve, loss_fn):
+    size = len(dataloader.dataset)
+    num_batches = len(dataloader)
+    alice.eval()
+    bob.eval()
+    eve.eval()
+    test_loss, correct = 0, 0
+    with torch.no_grad():
+        for X, y in dataloader:
+            X, y = X.to(device), y.to(device)
+            embeddings = torch.cat([alice(X), bob(X)], dim = 1)
+            pred = eve(embeddings)
+            test_loss += loss_fn(pred, y).item()
+            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+    test_loss /= num_batches
+    correct /= size
+    print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f}")
+
+
 
 # ----------------------------------------------------
 #               Encoding Training Loop
@@ -132,15 +171,15 @@ lr = 0.01
 payoff_tracking = torch.zeros(epochs, output_dim * 2, requires_grad=False)
 start_time = time.time()
 for epoch in range(epochs):
-    numBatches = len(train_dataloader) #assuming of equal size!
-    totalSize = len(train_dataloader.dataset)
-    batch_payoffs = torch.zeros(numBatches, output_dim * 2)
-    epoch_joint_AB = torch.zeros(output_dim * 2, output_dim * 2)
-    epoch_joint_ABc = torch.zeros_like(epoch_joint_AB)
-    epoch_outputs = torch.zeros(totalSize, output_dim * 2)
-    for batchInd, (batch, _) in enumerate(train_dataloader):
-        alice = aliceModel(batch)
-        bob = bobModel(batch)
+    numBatches = torch.tensor(len(train_dataloader)).to(device) #assuming of equal size!
+    totalSize = torch.tensor(len(train_dataloader.dataset)).to(device)
+    batch_payoffs = torch.zeros(numBatches, output_dim * 2).to(device)
+    epoch_joint_AB = torch.zeros(output_dim * 2, output_dim * 2).to(device)
+    epoch_joint_ABc = torch.zeros_like(epoch_joint_AB).to(device)
+    epoch_outputs = torch.zeros(totalSize, output_dim * 2).to(device)
+    for batchInd, (X, Y ) in enumerate(train_dataloader):
+        alice = aliceModel(X.to(device))
+        bob = bobModel(X.to(device))
         
         outputs = torch.cat([alice, bob], dim=1)
         epoch_outputs[(batchInd * batch_size):((batchInd + 1) * batch_size), :] = outputs.detach()
@@ -156,6 +195,10 @@ for epoch in range(epochs):
         
         # Calculate social payoff gradients
         socialgood.backward()
+        torch.nn.utils.clip_grad_norm_(aliceModel.parameters(), 1.0)
+        torch.nn.utils.clip_grad_norm_(bobModel.parameters(), 1.0)
+
+
         
         # Gradient ascend Alice and Bob
         with torch.no_grad():
@@ -164,9 +207,18 @@ for epoch in range(epochs):
                     p += p.grad * lr
                 model.zero_grad()
         
+        ### Train classifier
+        classifier_optimizer.zero_grad()
+        classifier_outputs = eveModel(outputs.detach())
+        classifier_loss = classifier_loss_fn(classifier_outputs, Y.to(device))
+        
+        classifier_loss.backward()
+        classifier_optimizer.step()
+        
+        
         if batchInd % 100 == 99:
-            sampleCount = (batchInd + 1) * len(batch)
-            print(f"socialgood: {socialgood.item():>7f}  [{sampleCount:>5d}/{totalSize:>5d}]")
+            sampleCount = (batchInd + 1) * batch_size
+            print(f"socialgood: {socialgood.item():>7f}, loss: {classifier_loss:>7f}  [{sampleCount:>5d}/{totalSize:>5d}]")
     
     epoch_payoffs = codinginefficiency((epoch_joint_AB, epoch_joint_ABc), epoch_outputs)
     epoch_social_good = torch.sum(epoch_payoffs)
@@ -176,7 +228,28 @@ for epoch in range(epochs):
           \t average social good: {epoch_social_good} bits    \n\
           \t percent of capacity: {epoch_social_good / max_bits_possible * 100} %\n")
 
+    test(test_dataloader, aliceModel, bobModel, eveModel, classifier_loss_fn)
 print("Took ", time.time() - start_time)
+# ----------------------------------------------------
+#         Compute Embeddings from Alice and Bob
+# ----------------------------------------------------
+
+# # Precompute embeddings
+# no_shuffe_train_data_loader = DataLoader(training_data, batch_size=batch_size)
+# no_shuffle_test_data_loader = DataLoader(test_data, batch_size = batch_size)
+# embedded_training_data = torch.zeros(len(training_data), output_dim * 2)
+# embedded_test_data = torch.zeros(len(test_data), output_dim * 2)
+# for batchInd, (X,_) in enumerate(no_shuffe_train_data_loader):
+#     embedding =  torch.cat([aliceModel(X), bobModel(X)], dim=1)
+#     embedded_training_data[(batchInd * batch_size):((batchInd + 1) * batch_size),:] = embedding
+
+# for batchInd, (X,_) in enumerate(no_shuffle_test_data_loader):
+#     embedding =  torch.cat([aliceModel(X), bobModel(X)], dim=1)
+#     embedded_test_data[(batchInd * batch_size):((batchInd+ 1) * batch_size),:] = embedding
+
+# embedding_data_loader = 
+
+
 
         
     
